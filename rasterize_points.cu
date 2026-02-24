@@ -154,6 +154,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	const torch::Tensor& projmatrix,
 	const float tan_fovx,
 	const float tan_fovy,
+	const torch::Tensor& R_cam_to_view,
+	const torch::Tensor& dist_params,
 	const torch::Tensor& dL_dout_color,
 	const torch::Tensor& dL_dout_others,
 	const torch::Tensor& sh,
@@ -175,6 +177,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
   CHECK_INPUT(transMat_precomp);
   CHECK_INPUT(viewmatrix);
   CHECK_INPUT(projmatrix);
+  CHECK_INPUT(R_cam_to_view);
+  CHECK_INPUT(dist_params);
   CHECK_INPUT(sh);
   CHECK_INPUT(campos);
   CHECK_INPUT(binningBuffer);
@@ -218,6 +222,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	  campos.contiguous().data<float>(),
 	  tan_fovx,
 	  tan_fovy,
+	  R_cam_to_view.contiguous().data<float>(),
+	  dist_params.contiguous().data<float>(),
 	  radii.contiguous().data<int>(),
 	  reinterpret_cast<char*>(geomBuffer.contiguous().data_ptr()),
 	  reinterpret_cast<char*>(binningBuffer.contiguous().data_ptr()),

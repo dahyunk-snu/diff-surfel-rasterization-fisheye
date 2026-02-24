@@ -358,6 +358,8 @@ void CudaRasterizer::Rasterizer::backward(
 	const float* projmatrix,
 	const float* campos,
 	const float tan_fovx, float tan_fovy,
+	const float* R_cam_to_view,
+	const float* dist_params,
 	const int* radii,
 	char* geom_buffer,
 	char* binning_buffer,
@@ -436,6 +438,8 @@ void CudaRasterizer::Rasterizer::backward(
 		projmatrix,
 		focal_x, focal_y,
 		tan_fovx, tan_fovy,
+		R_cam_to_view,
+		dist_params,
 		(glm::vec3*)campos,
 		(float4*)dL_dmean2D, // gradient inputs
 		dL_dnormal,		     // gradient inputs

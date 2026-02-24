@@ -56,6 +56,8 @@ namespace BACKWARD
 		const float* proj,
 		const float focal_x, const float focal_y,
 		const float tan_fovx, const float tan_fovy,
+		const float* R_cam_to_view,
+		const float* dist_params,
 		const glm::vec3* campos,
 		float4* dL_dmean2D,
 		const float* dL_dnormal3D,

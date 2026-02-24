@@ -609,6 +609,10 @@ __global__ void computeAABB(int P,
 	const int * radii,
 	const float W, const float H,
 	const float * transMats,
+	const float3* means3D,
+	const float* viewmatrix,
+	const float* R_cam_to_view,
+	const float* dist_params,
 	float4 * dL_dmean2Ds,
 	float *dL_dtransMats) {
 	
@@ -653,15 +657,147 @@ __global__ void computeAABB(int P,
 
 	// just use to hack the projected 2D gradient here.
 	float z = transMat[8];
-	dL_dmean2Ds[idx].x = dL_dtransMats[9 * idx + 2] * z * W; // to ndc 
-	dL_dmean2Ds[idx].y = dL_dtransMats[9 * idx + 5] * z * H; // to ndc
+	float dL_du = dL_dtransMats[9 * idx + 2] * z * W; 
+    float dL_dv = dL_dtransMats[9 * idx + 5] * z * H;
 
-    //AbsGS
-    dL_dmean2Ds[idx].z += dL_dT0.z; // to ndc
-    dL_dmean2Ds[idx].z *= z * W;
+    // AbsGS
+	float dL_du_abs = (dL_dmean2D.z + dL_dT0.z) * z * W;
+    float dL_dv_abs = (dL_dmean2D.w + dL_dT1.z) * z * H;
 
-    dL_dmean2Ds[idx].w += dL_dT1.z; // to ndc
-    dL_dmean2Ds[idx].w *= z * H;
+	// Fisheye
+	float3 p_world = means3D[idx];
+    float3 p_view = {
+        viewmatrix[0] * p_world.x + viewmatrix[4] * p_world.y + viewmatrix[8] * p_world.z + viewmatrix[12],
+        viewmatrix[1] * p_world.x + viewmatrix[5] * p_world.y + viewmatrix[9] * p_world.z + viewmatrix[13],
+        viewmatrix[2] * p_world.x + viewmatrix[6] * p_world.y + viewmatrix[10] * p_world.z + viewmatrix[14]
+    };
+    float3 p_cam = {
+        R_cam_to_view[0] * p_view.x + R_cam_to_view[3] * p_view.y + R_cam_to_view[6] * p_view.z,
+        R_cam_to_view[1] * p_view.x + R_cam_to_view[4] * p_view.y + R_cam_to_view[7] * p_view.z,
+        R_cam_to_view[2] * p_view.x + R_cam_to_view[5] * p_view.y + R_cam_to_view[8] * p_view.z
+    };
+
+	float l = sqrt(p_cam.x * p_cam.x + p_cam.y * p_cam.y);
+    float theta = atan2(l, p_cam.z);
+
+	// If the point is too close to the camera center, the gradient will be unstable.
+	if (theta < 1e-5f || l < 1e-5f || p_cam.z < 1e-5f) {
+        dL_dmean2Ds[idx].x = dL_du;
+        dL_dmean2Ds[idx].y = dL_dv;
+        dL_dmean2Ds[idx].z = dL_du_abs;
+        dL_dmean2Ds[idx].w = dL_dv_abs;
+        return;
+    }
+
+	// OpenCV fisheye distortion model
+	float k1 = dist_params[0];
+    float k2 = dist_params[1];
+    float k3 = dist_params[2];
+    float k4 = dist_params[3];
+
+    float th2 = theta * theta;
+    float th4 = th2 * th2;
+    float th6 = th4 * th2;
+    float th8 = th4 * th4;
+
+	float r = theta * (1.0f + k1 * th2 + k2 * th4 + k3 * th6 + k4 * th8);
+	float dr_dtheta = 1.0f + 3.0f * k1 * th2 + 5.0f * k2 * th4 + 7.0f * k3 * th6 + 9.0f * k4 * th8;
+
+	float u_cam = r * (p_cam.x / l);
+    float v_cam = r * (p_cam.y / l);
+
+	float sin_th = sin(theta), cos_th = cos(theta);
+    float inv_r = 1.0f / r, inv_r2 = inv_r * inv_r, inv_r3 = inv_r2 * inv_r;
+    float dtheta_dr = 1.0f / dr_dtheta;
+
+	// Compute the gradient of the projected 2D point w.r.t. the 3D point in camera space.
+	float dx_du = cos_th * dtheta_dr * (u_cam * u_cam * inv_r2) + sin_th * (r * r - u_cam * u_cam) * inv_r3;
+    float dx_dv = cos_th * dtheta_dr * (u_cam * v_cam * inv_r2) - sin_th * (u_cam * v_cam) * inv_r3;
+    float dy_du = dx_dv; 
+    float dy_dv = cos_th * dtheta_dr * (v_cam * v_cam * inv_r2) + sin_th * (r * r - v_cam * v_cam) * inv_r3;
+    float dz_du = -sin_th * dtheta_dr * u_cam * inv_r;
+    float dz_dv = -sin_th * dtheta_dr * v_cam * inv_r;
+
+    float inv_z2 = 1.0f / (p_view.z * p_view.z);
+    float m11 = (R_cam_to_view[0] * p_view.z - R_cam_to_view[6] * p_view.x) * inv_z2;
+    float m12 = (R_cam_to_view[1] * p_view.z - R_cam_to_view[7] * p_view.x) * inv_z2;
+    float m13 = (R_cam_to_view[2] * p_view.z - R_cam_to_view[8] * p_view.x) * inv_z2;
+    float m21 = (R_cam_to_view[3] * p_view.z - R_cam_to_view[6] * p_view.y) * inv_z2;
+    float m22 = (R_cam_to_view[4] * p_view.z - R_cam_to_view[7] * p_view.y) * inv_z2;
+    float m23 = (R_cam_to_view[5] * p_view.z - R_cam_to_view[8] * p_view.y) * inv_z2;
+
+    float J11 = m11 * dx_du + m12 * dy_du + m13 * dz_du;
+    float J12 = m11 * dx_dv + m12 * dy_dv + m13 * dz_dv;
+    float J21 = m21 * dx_du + m22 * dy_du + m23 * dz_du;
+    float J22 = m21 * dx_dv + m22 * dy_dv + m23 * dz_dv;
+
+    dL_dmean2Ds[idx].x = J11 * dL_du + J21 * dL_dv;
+    dL_dmean2Ds[idx].y = J12 * dL_du + J22 * dL_dv;
+
+    // AbsGS
+    dL_dmean2Ds[idx].z = abs(J11) * dL_du_abs + abs(J21) * dL_dv_abs;
+    dL_dmean2Ds[idx].w = abs(J12) * dL_du_abs + abs(J22) * dL_dv_abs;
+
+    if (idx == 0) {
+        printf("\n=========================================================\n");
+        printf("   [DEBUG] computeAABB Iteration 0 - Manual Trace Log\n");
+        printf("=========================================================\n");
+
+        printf("\n[Section 0] Base Inputs & Parameters\n");
+        printf("  - W = %.2f, H = %.2f, z_depth (transMat[8]) = %.6f\n", W, H, z);
+        printf("  - dist_params (k1~k4): [ %.6f, %.6f, %.6f, %.6f ]\n", k1, k2, k3, k4);
+        
+        printf("\n  - viewmatrix (Column-major in memory, printed as 3x4 Row-major):\n");
+        printf("    [ %.6f, %.6f, %.6f, %.6f ]\n", viewmatrix[0], viewmatrix[4], viewmatrix[8], viewmatrix[12]);
+        printf("    [ %.6f, %.6f, %.6f, %.6f ]\n", viewmatrix[1], viewmatrix[5], viewmatrix[9], viewmatrix[13]);
+        printf("    [ %.6f, %.6f, %.6f, %.6f ]\n", viewmatrix[2], viewmatrix[6], viewmatrix[10], viewmatrix[14]);
+
+        printf("\n  - R_cam_to_view (Row-major in memory 3x3):\n");
+        printf("    [ %.6f, %.6f, %.6f ]\n", R_cam_to_view[0], R_cam_to_view[3], R_cam_to_view[6]);
+        printf("    [ %.6f, %.6f, %.6f ]\n", R_cam_to_view[1], R_cam_to_view[4], R_cam_to_view[7]);
+        printf("    [ %.6f, %.6f, %.6f ]\n", R_cam_to_view[2], R_cam_to_view[5], R_cam_to_view[8]);
+
+        printf("\n[Section 1] 3D Point Transformations\n");
+        printf("  - p_world : (%.6f, %.6f, %.6f)\n", p_world.x, p_world.y, p_world.z);
+        printf("  - p_view  : (%.6f, %.6f, %.6f)  <- viewmatrix * p_world\n", p_view.x, p_view.y, p_view.z);
+        printf("  - p_cam   : (%.6f, %.6f, %.6f)  <- R_cam_to_view * p_view\n", p_cam.x, p_cam.y, p_cam.z);
+
+        printf("\n[Section 2] Fisheye Model Variables\n");
+        printf("  - l (sqrt(x^2+y^2)): %.6f\n", l);
+        printf("  - theta (atan2(l, z)): %.6f (rad)\n", theta);
+        printf("  - r(theta) : %.6f\n", r);
+        printf("  - r'(theta): %.6f  =>  dtheta_dr (1/r'): %.6f\n", dr_dtheta, dtheta_dr);
+        printf("  - u_cam (r*x/l): %.6f, v_cam (r*y/l): %.6f\n", u_cam, v_cam);
+        printf("  - sin_th: %.6f, cos_th: %.6f\n", sin_th, cos_th);
+        printf("  - inv_r: %.6f, inv_r2: %.6f, inv_r3: %.6f\n", inv_r, inv_r2, inv_r3);
+
+        printf("\n[Section 3] J1 Matrix (Fisheye 2D -> Fisheye 3D Ray)\n");
+        printf("  - dx_du: %.6f, dx_dv: %.6f\n", dx_du, dx_dv);
+        printf("  - dy_du: %.6f, dy_dv: %.6f\n", dy_du, dy_dv);
+        printf("  - dz_du: %.6f, dz_dv: %.6f\n", dz_du, dz_dv);
+
+        printf("\n[Section 4] M Matrix (J3 * R_cam_to_view)\n");
+        printf("  - inv_z2 (1 / p_view.z^2): %.6f\n", inv_z2);
+        printf("  - M row 1: [ %.6f, %.6f, %.6f ]\n", m11, m12, m13);
+        printf("  - M row 2: [ %.6f, %.6f, %.6f ]\n", m21, m22, m23);
+
+        printf("\n[Section 5] Final Jacobian J_total = M * J1\n");
+        printf("  - J11: %.6f, J12: %.6f\n", J11, J12);
+        printf("  - J21: %.6f, J22: %.6f\n", J21, J22);
+
+        printf("\n[Section 6] Gradient Transformations\n");
+        printf("  - [Input] Raw Grad      (dL_du, dL_dv) = (%.6f, %.6f)\n", dL_du, dL_dv);
+        printf("  - [Input] Raw Abs Grad  (dL_du_abs, dL_dv_abs) = (%.6f, %.6f)\n", dL_du_abs, dL_dv_abs);
+        printf("  ---------------------------------------------------------\n");
+        printf("  - [Output] Fish Grad    (x, y) = (%.6f, %.6f)\n", dL_dmean2Ds[idx].x, dL_dmean2Ds[idx].y);
+        printf("  - [Output] Fish Abs Grad(z, w) = (%.6f, %.6f)\n", dL_dmean2Ds[idx].z, dL_dmean2Ds[idx].w);
+        
+        printf("\n=========================================================\n");
+        printf("   [TRAP] Execution halted for manual verification.\n");
+        printf("=========================================================\n");
+        
+        __trap();
+    }
 
 }
 
@@ -680,6 +816,8 @@ void BACKWARD::preprocess(
 	const float* projmatrix,
 	const float focal_x, const float focal_y,
 	const float tan_fovx, const float tan_fovy,
+	const float* R_cam_to_view,
+	const float* dist_params,
 	const glm::vec3* campos, 
 	float4* dL_dmean2Ds,
 	const float* dL_dnormal3Ds,
@@ -704,6 +842,10 @@ void BACKWARD::preprocess(
 		radii,
 		W, H,
 		transMats,
+		(float3*)means3D,
+		viewmatrix,
+		R_cam_to_view,
+		dist_params,
 		dL_dmean2Ds,
 		dL_dtransMats);
 	
