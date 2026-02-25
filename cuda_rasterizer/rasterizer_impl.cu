@@ -214,6 +214,9 @@ int CudaRasterizer::Rasterizer::forward(
 	const float* projmatrix,
 	const float* cam_pos,
 	const float tan_fovx, float tan_fovy,
+	float focal_cam_x, float focal_cam_y,
+	const float* R_cam_to_view,
+	const float* dist_params,
 	const bool prefiltered,
 	float* out_color,
 	float* out_others,
@@ -336,7 +339,10 @@ int CudaRasterizer::Rasterizer::forward(
 		imgState.n_contrib,
 		background,
 		out_color,
-		out_others), debug)
+		out_others,
+		R_cam_to_view,
+		dist_params,
+		focal_cam_x, focal_cam_y), debug)
 
 	return num_rendered;
 }
