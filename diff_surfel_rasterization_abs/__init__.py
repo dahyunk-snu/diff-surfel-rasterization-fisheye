@@ -70,6 +70,10 @@ class _RasterizeGaussians(torch.autograd.Function):
             raster_settings.projmatrix,
             raster_settings.tanfovx,
             raster_settings.tanfovy,
+            raster_settings.focus_cam_x,
+            raster_settings.focus_cam_y,
+            raster_settings.R_cam_to_view,
+            raster_settings.dist_params,
             raster_settings.image_height,
             raster_settings.image_width,
             sh,
@@ -162,6 +166,8 @@ class GaussianRasterizationSettings(NamedTuple):
     image_width: int 
     tanfovx : float
     tanfovy : float
+    focus_cam_x : float
+    focus_cam_y : float
     bg : torch.Tensor
     scale_modifier : float
     viewmatrix : torch.Tensor
