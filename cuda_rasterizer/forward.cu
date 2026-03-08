@@ -188,6 +188,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float4* normal_opacity,
 	const dim3 grid,
 	uint32_t* tiles_touched,
+	const bool* mask,
 	bool prefiltered)
 {
 	auto idx = cg::this_grid().thread_rank();
@@ -202,7 +203,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	glm::vec3 p_world = glm::vec3(orig_points[3 * idx], orig_points[3 * idx + 1], orig_points[3 * idx + 2]);
 	// Perform near culling, quit if outside.
 	float3 p_view;
-	if (!in_frustum(idx, orig_points, viewmatrix, projmatrix, prefiltered, p_view))
+	if (!in_frustum(idx, orig_points, viewmatrix, projmatrix, prefiltered, mask, p_view))
 		return;
 	
 	float4 intrins = {focal_x, focal_y, float(W)/2.0, float(H)/2.0};
@@ -520,6 +521,7 @@ void FORWARD::preprocess(int P, int D, int M,
 	float4* normal_opacity,
 	const dim3 grid,
 	uint32_t* tiles_touched,
+	const bool* mask,
 	bool prefiltered)
 {
 	preprocessCUDA<NUM_CHANNELS> << <(P + 255) / 256, 256 >> > (
@@ -547,6 +549,7 @@ void FORWARD::preprocess(int P, int D, int M,
 		normal_opacity,
 		grid,
 		tiles_touched,
+		mask,
 		prefiltered
 		);
 }

@@ -214,6 +214,7 @@ int CudaRasterizer::Rasterizer::forward(
 	const float* projmatrix,
 	const float* cam_pos,
 	const float tan_fovx, float tan_fovy,
+	const bool* mask,
 	const bool prefiltered,
 	float* out_color,
 	float* out_others,
@@ -270,6 +271,7 @@ int CudaRasterizer::Rasterizer::forward(
 		geomState.normal_opacity,
 		tile_grid,
 		geomState.tiles_touched,
+		mask,
 		prefiltered
 	), debug)
 

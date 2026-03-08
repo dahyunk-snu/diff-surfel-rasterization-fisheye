@@ -55,6 +55,7 @@ RasterizeGaussiansCUDA(
 	const torch::Tensor& sh,
 	const int degree,
 	const torch::Tensor& campos,
+	const torch::Tensor& mask,
 	const bool prefiltered,
 	const bool debug)
 {
@@ -85,6 +86,7 @@ RasterizeGaussiansCUDA(
   CHECK_INPUT(projmatrix);
   CHECK_INPUT(sh);
   CHECK_INPUT(campos);
+  CHECK_INPUT(mask);
 
   auto int_opts = means3D.options().dtype(torch::kInt32);
   auto float_opts = means3D.options().dtype(torch::kFloat32);
@@ -131,6 +133,7 @@ RasterizeGaussiansCUDA(
 		campos.contiguous().data<float>(),
 		tan_fovx,
 		tan_fovy,
+		mask.contiguous().data<bool>(),
 		prefiltered,
 		out_color.contiguous().data<float>(),
 		out_others.contiguous().data<float>(),

@@ -184,6 +184,38 @@ __forceinline__ __device__ bool in_frustum(int idx,
 	return true;
 }
 
+__forceinline__ __device__ bool in_frustum(int idx,
+    const float* orig_points,
+    const float* viewmatrix,
+    const float* projmatrix,
+    bool prefiltered,
+    const bool* mask,
+    float3& p_view)
+{
+	float3 p_orig = { orig_points[3 * idx], orig_points[3 * idx + 1], orig_points[3 * idx + 2] };
+    p_view = transformPoint4x3(p_orig, viewmatrix);
+
+    if (p_view.z <= 0.01f) {
+        if (prefiltered)
+        {
+            printf("Point is filtered although prefiltered is set. This shouldn't happen!");
+            __trap();
+        }
+        return false;
+    }
+
+    if (p_view.z <= 0.2f && (mask==nullptr || !mask[idx])) {
+		if (prefiltered)
+        {
+            printf("Point is filtered although prefiltered is set. This shouldn't happen!");
+            __trap();
+        }
+        return false;
+    }
+	
+    return true;
+}
+
 // adopt from gsplat: https://github.com/nerfstudio-project/gsplat/blob/main/gsplat/cuda/csrc/forward.cu
 inline __device__ glm::mat3 quat_to_rotmat(const glm::vec4 quat) {
 	// quat to rotation matrix
