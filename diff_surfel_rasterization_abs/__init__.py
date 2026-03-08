@@ -213,6 +213,9 @@ class GaussianRasterizer(nn.Module):
         if cov3D_precomp is None:
             cov3D_precomp = torch.Tensor([]).cuda()
         
+        if raster_settings.mask is None:
+            null_mask = torch.empty(0, dtype=torch.bool).cuda()
+            raster_settings = raster_settings._replace(mask=null_mask)
 
         # Invoke C++/CUDA rasterization routine
         return rasterize_gaussians(
