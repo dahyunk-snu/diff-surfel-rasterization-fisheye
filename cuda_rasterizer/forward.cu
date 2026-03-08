@@ -439,7 +439,7 @@ renderCUDA(
 			
 			float depth = (rho3d <= rho2d) ? (s.x * Tw.x + s.y * Tw.y) + Tw.z : Tw.z; // splat depth
 			// if (depth < NEAR_PLANE) continue;
-			if (depth < 0.01f) continue;
+			if (depth < 0.1f) continue;
 			float4 nor_o = collected_normal_opacity[j];
 			float normal[3] = {nor_o.x, nor_o.y, nor_o.z};
 			float power = -0.5f * rho;

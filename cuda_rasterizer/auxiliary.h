@@ -280,50 +280,65 @@ __forceinline__ __device__ bool in_frustum(int idx,
     float3 p_orig = { orig_points[3 * idx], orig_points[3 * idx + 1], orig_points[3 * idx + 2] };
 
     // Bring points to screen space
-    float4 p_hom = transformPoint4x4(p_orig, projmatrix);
-    float p_w = 1.0f / (p_hom.w + 0.0000001f);
-    float3 p_proj = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z * p_w };
     p_view = transformPoint4x3(p_orig, viewmatrix);
 
-    // Estimate the maximum radius of the point in screen space
-    glm::vec2 scale = scales[idx];
-	scale.x *= scale_modifier;
-    scale.y *= scale_modifier;
-	glm::vec4 quat = rotations[idx];
-    glm::mat3 R = quat_to_rotmat(quat);
+	if (p_view.z > 0.2f) 
+	{
+		return true;
+	}
 
-	glm::mat3 W = glm::mat3(
-        viewmatrix[0], viewmatrix[1], viewmatrix[2],
-        viewmatrix[4], viewmatrix[5], viewmatrix[6],
-        viewmatrix[8], viewmatrix[9], viewmatrix[10]
-    );
-	
-	glm::mat3 R_view = W * R;
-	float sigma_z = sqrtf(
-        (R_view[0][2] * scale.x) * (R_view[0][2] * scale.x) + 
-        (R_view[1][2] * scale.y) * (R_view[1][2] * scale.y)
-    );
+	bool cull = false;
 
-#if TIGHTBBOX
-    float truncated_R = sqrtf(max(9.f + logf(opacities[idx]), 0.000001f));
-#else
-    float truncated_R = 3.f;
-#endif
+	if (p_view.z <= 0.1f)
+	{
+		cull = true;
+	}
+	else 
+	{
+		glm::vec2 scale = scales[idx];
+		scale.x *= scale_modifier;
+		scale.y *= scale_modifier;
+		glm::vec4 quat = rotations[idx];
+		glm::mat3 R = quat_to_rotmat(quat);
 
-    float extent_z = sigma_z * truncated_R;
+		glm::mat3 W = glm::mat3(
+			viewmatrix[0], viewmatrix[1], viewmatrix[2],
+			viewmatrix[4], viewmatrix[5], viewmatrix[6],
+			viewmatrix[8], viewmatrix[9], viewmatrix[10]
+		);
+		
+		glm::mat3 R_view = W * R;
+		float sigma_z = sqrtf(
+			(R_view[0][2] * scale.x) * (R_view[0][2] * scale.x) + 
+			(R_view[1][2] * scale.y) * (R_view[1][2] * scale.y)
+		);
 
-    // Bounding Sphere Volume Culling
-    if (p_view.z + extent_z <= 0.2f || p_view.z <= 0.01f)
-    {
-        if (prefiltered)
-        {
-            printf("Point is filtered although prefiltered is set. This shouldn't happen!");
-            __trap();
-        }
-        return false;
-    }
+	#if TIGHTBBOX
+		float truncated_R = sqrtf(max(9.f + logf(opacities[idx]), 0.000001f));
+	#else
+		float truncated_R = 3.f;
+	#endif
 
-    return true;
+		float extent_z = sigma_z * truncated_R;
+
+		// Bounding Sphere Volume Culling
+		if (p_view.z + extent_z <= 0.2f)
+		{
+			cull = true;
+		}
+	}
+
+	if (cull)
+	{
+		if (prefiltered)
+		{
+			printf("Point is filtered although prefiltered is set. This shouldn't happen!");
+			__trap();
+		}
+		return false;
+	}
+
+	return true;
 }
 
 
