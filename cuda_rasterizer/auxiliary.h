@@ -287,6 +287,8 @@ __forceinline__ __device__ bool in_frustum(int idx,
 
     // Estimate the maximum radius of the point in screen space
     glm::vec2 scale = scales[idx];
+	scale.x *= scale_modifier;
+    scale.y *= scale_modifier;
 	glm::vec4 quat = rotations[idx];
     glm::mat3 R = quat_to_rotmat(quat);
 
@@ -310,7 +312,7 @@ __forceinline__ __device__ bool in_frustum(int idx,
 
     float extent_z = sigma_z * truncated_R;
 
-    // Bounding Sphere Volume Culling: 구의 앞쪽 끝자락이 0.2 평면을 넘지 못하면 폐기
+    // Bounding Sphere Volume Culling
     if (p_view.z + extent_z <= 0.2f || p_view.z <= 0.01f)
     {
         if (prefiltered)
