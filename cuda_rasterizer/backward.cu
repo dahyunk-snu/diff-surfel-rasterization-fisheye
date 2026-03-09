@@ -146,6 +146,7 @@ renderCUDA(
 	const uint2* __restrict__ ranges,
 	const uint32_t* __restrict__ point_list,
 	int W, int H,
+	const int roi_x_min, int roi_x_max, int roi_y_min, int roi_y_max,
 	float focal_x, float focal_y,
 	const float* __restrict__ bg_color,
 	const float2* __restrict__ points_xy_image,
@@ -172,7 +173,8 @@ renderCUDA(
 	const uint32_t pix_id = W * pix.y + pix.x;
 	const float2 pixf = { (float)pix.x + 0.5, (float)pix.y + 0.5};
 
-	const bool inside = pix.x < W&& pix.y < H;
+	// const bool inside = pix.x < W&& pix.y < H;
+	const bool inside = (pix.x >= roi_x_min && pix.x < roi_x_max && pix.y >= roi_y_min && pix.y < roi_y_max);
 	const uint2 range = ranges[block.group_index().y * horizontal_blocks + block.group_index().x];
 
 	const int rounds = ((range.y - range.x + BLOCK_SIZE - 1) / BLOCK_SIZE);
@@ -825,6 +827,7 @@ void BACKWARD::render(
 	const uint2* ranges,
 	const uint32_t* point_list,
 	int W, int H,
+	const int roi_x_min, int roi_x_max, int roi_y_min, int roi_y_max,
 	float focal_x, float focal_y,
 	const float* bg_color,
 	const float2* means2D,
@@ -846,6 +849,7 @@ void BACKWARD::render(
 		ranges,
 		point_list,
 		W, H,
+		roi_x_min, roi_x_max, roi_y_min, roi_y_max,
 		focal_x, focal_y,
 		bg_color,
 		means2D,

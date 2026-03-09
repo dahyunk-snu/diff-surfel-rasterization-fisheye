@@ -55,6 +55,7 @@ namespace FORWARD
 		const uint2* ranges,
 		const uint32_t* point_list,
 		int W, int H,
+		const int roi_x_min, int roi_x_max, int roi_y_min, int roi_y_max,
 		float focal_x, float focal_y,
 		const float2* points_xy_image,
 		const float* features,

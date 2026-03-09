@@ -269,6 +269,7 @@ renderCUDA(
 	const uint2* __restrict__ ranges,
 	const uint32_t* __restrict__ point_list,
 	int W, int H,
+	const int roi_x_min, int roi_x_max, int roi_y_min, int roi_y_max,
 	float focal_x, float focal_y,
 	const float2* __restrict__ points_xy_image,
 	const float* __restrict__ features,
@@ -294,7 +295,8 @@ renderCUDA(
 	float2 pixf = { (float)pix.x + 0.5, (float)pix.y + 0.5};
 
 	// Check if this thread is associated with a valid pixel or outside.
-	bool inside = pix.x < W&& pix.y < H;
+	// bool inside = pix.x < W&& pix.y < H;
+	const bool inside = (pix.x >= roi_x_min && pix.x < roi_x_max && pix.y >= roi_y_min && pix.y < roi_y_max);
 	// Done threads can help with fetching, but don't rasterize
 	bool done = !inside;
 
@@ -523,6 +525,7 @@ void FORWARD::render(
 	const uint2* ranges,
 	const uint32_t* point_list,
 	int W, int H,
+	const int roi_x_min, int roi_x_max, int roi_y_min, int roi_y_max,
 	float focal_x, float focal_y,
 	const float2* means2D,
 	const float* colors,
@@ -542,6 +545,7 @@ void FORWARD::render(
 		ranges,
 		point_list,
 		W, H,
+		roi_x_min, roi_x_max, roi_y_min, roi_y_max,
 		focal_x, focal_y,
 		means2D,
 		colors,
