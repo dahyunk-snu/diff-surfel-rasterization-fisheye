@@ -251,7 +251,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 		rgb[idx * C + 2] = result.z;
 	}
 
-	depths[idx] = p_view.z;
+	// depths[idx] = p_view.z;
+	depths[idx] = glm::length(p_world - *cam_pos);
 	radii[idx] = (int)radius;
 	points_xy_image[idx] = center;
 	// store them in float4
