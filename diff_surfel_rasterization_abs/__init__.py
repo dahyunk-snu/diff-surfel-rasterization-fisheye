@@ -55,7 +55,33 @@ class _RasterizeGaussians(torch.autograd.Function):
         cov3Ds_precomp,
         raster_settings,
     ):
-
+        # ROI for rasterization based on the view
+        if raster_settings.view == "forward":
+            roi_x_min = 0
+            roi_x_max = raster_settings.image_width
+            roi_y_min = 0
+            roi_y_max = raster_settings.image_height
+        elif raster_settings.view == "up":
+            roi_x_min = 0
+            roi_x_max = raster_settings.image_width
+            roi_y_min = raster_settings.image_height // 2
+            roi_y_max = raster_settings.image_height
+        elif raster_settings.view == "down":
+            roi_x_min = 0
+            roi_x_max = raster_settings.image_width
+            roi_y_min = 0
+            roi_y_max = raster_settings.image_height // 2
+        elif raster_settings.view == "left":
+            roi_x_min = raster_settings.image_width // 2
+            roi_x_max = raster_settings.image_width
+            roi_y_min = 0
+            roi_y_max = raster_settings.image_height
+        elif raster_settings.view == "right":
+            roi_x_min = 0
+            roi_x_max = raster_settings.image_width // 2
+            roi_y_min = 0
+            roi_y_max = raster_settings.image_height
+        
         # Restructure arguments the way that the C++ lib expects them
         args = (
             raster_settings.bg, 
@@ -70,8 +96,16 @@ class _RasterizeGaussians(torch.autograd.Function):
             raster_settings.projmatrix,
             raster_settings.tanfovx,
             raster_settings.tanfovy,
+            raster_settings.focus_cam_x,
+            raster_settings.focus_cam_y,
+            raster_settings.R_cam_to_view,
+            raster_settings.dist_params,
             raster_settings.image_height,
             raster_settings.image_width,
+            roi_x_min,
+            roi_x_max,
+            roi_y_min,
+            roi_y_max,
             sh,
             raster_settings.sh_degree,
             raster_settings.campos,
@@ -94,6 +128,10 @@ class _RasterizeGaussians(torch.autograd.Function):
         # Keep relevant tensors for backward
         ctx.raster_settings = raster_settings
         ctx.num_rendered = num_rendered
+        ctx.roi_x_min = roi_x_min
+        ctx.roi_x_max = roi_x_max
+        ctx.roi_y_min = roi_y_min
+        ctx.roi_y_max = roi_y_max
         ctx.save_for_backward(colors_precomp, means3D, scales, rotations, cov3Ds_precomp, radii, sh, geomBuffer, binningBuffer, imgBuffer)
         return color, radii, depth
 
@@ -103,6 +141,10 @@ class _RasterizeGaussians(torch.autograd.Function):
         # Restore necessary values from context
         num_rendered = ctx.num_rendered
         raster_settings = ctx.raster_settings
+        roi_x_min = ctx.roi_x_min
+        roi_x_max = ctx.roi_x_max
+        roi_y_min = ctx.roi_y_min
+        roi_y_max = ctx.roi_y_max
         colors_precomp, means3D, scales, rotations, cov3Ds_precomp, radii, sh, geomBuffer, binningBuffer, imgBuffer = ctx.saved_tensors
 
         # Restructure args as C++ method expects them
@@ -118,8 +160,14 @@ class _RasterizeGaussians(torch.autograd.Function):
                 raster_settings.projmatrix, 
                 raster_settings.tanfovx, 
                 raster_settings.tanfovy, 
+                raster_settings.R_cam_to_view,
+                raster_settings.dist_params,
                 grad_out_color,
                 grad_depth,
+                roi_x_min,
+                roi_x_max,
+                roi_y_min,
+                roi_y_max,
                 sh, 
                 raster_settings.sh_degree, 
                 raster_settings.campos,
@@ -156,14 +204,19 @@ class _RasterizeGaussians(torch.autograd.Function):
         return grads
 
 class GaussianRasterizationSettings(NamedTuple):
+    view: str
     image_height: int
     image_width: int 
     tanfovx : float
     tanfovy : float
+    focus_cam_x : float
+    focus_cam_y : float
     bg : torch.Tensor
     scale_modifier : float
     viewmatrix : torch.Tensor
     projmatrix : torch.Tensor
+    R_cam_to_view : torch.Tensor
+    dist_params : torch.Tensor
     sh_degree : int
     campos : torch.Tensor
     prefiltered : bool

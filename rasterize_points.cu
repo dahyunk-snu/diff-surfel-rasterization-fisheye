@@ -50,8 +50,16 @@ RasterizeGaussiansCUDA(
 	const torch::Tensor& projmatrix,
 	const float tan_fovx, 
 	const float tan_fovy,
+	const float focal_cam_x,
+	const float focal_cam_y,
+	const torch::Tensor& R_cam_to_view,
+	const torch::Tensor& dist_params,
 	const int image_height,
 	const int image_width,
+	const int roi_x_min,
+	const int roi_x_max,
+	const int roi_y_min,
+	const int roi_y_max,
 	const torch::Tensor& sh,
 	const int degree,
 	const torch::Tensor& campos,
@@ -83,6 +91,8 @@ RasterizeGaussiansCUDA(
   CHECK_INPUT(transMat_precomp);
   CHECK_INPUT(viewmatrix);
   CHECK_INPUT(projmatrix);
+  CHECK_INPUT(R_cam_to_view);
+  CHECK_INPUT(dist_params);
   CHECK_INPUT(sh);
   CHECK_INPUT(campos);
 
@@ -118,6 +128,7 @@ RasterizeGaussiansCUDA(
 		P, degree, M,
 		background.contiguous().data<float>(),
 		W, H,
+		roi_x_min, roi_x_max, roi_y_min, roi_y_max,
 		means3D.contiguous().data<float>(),
 		sh.contiguous().data_ptr<float>(),
 		colors.contiguous().data<float>(), 
@@ -131,6 +142,10 @@ RasterizeGaussiansCUDA(
 		campos.contiguous().data<float>(),
 		tan_fovx,
 		tan_fovy,
+		focal_cam_x,
+		focal_cam_y,
+		R_cam_to_view.contiguous().data<float>(),
+		dist_params.contiguous().data<float>(),
 		prefiltered,
 		out_color.contiguous().data<float>(),
 		out_others.contiguous().data<float>(),
@@ -154,8 +169,14 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	const torch::Tensor& projmatrix,
 	const float tan_fovx,
 	const float tan_fovy,
+	const torch::Tensor& R_cam_to_view,
+	const torch::Tensor& dist_params,
 	const torch::Tensor& dL_dout_color,
 	const torch::Tensor& dL_dout_others,
+	const int roi_x_min,
+	const int roi_x_max,
+	const int roi_y_min,
+	const int roi_y_max,
 	const torch::Tensor& sh,
 	const int degree,
 	const torch::Tensor& campos,
@@ -175,6 +196,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
   CHECK_INPUT(transMat_precomp);
   CHECK_INPUT(viewmatrix);
   CHECK_INPUT(projmatrix);
+  CHECK_INPUT(R_cam_to_view);
+  CHECK_INPUT(dist_params);
   CHECK_INPUT(sh);
   CHECK_INPUT(campos);
   CHECK_INPUT(binningBuffer);
@@ -206,6 +229,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	  CudaRasterizer::Rasterizer::backward(P, degree, M, R,
 	  background.contiguous().data<float>(),
 	  W, H, 
+	  roi_x_min, roi_x_max, roi_y_min, roi_y_max,
 	  means3D.contiguous().data<float>(),
 	  sh.contiguous().data<float>(),
 	  colors.contiguous().data<float>(),
@@ -218,6 +242,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	  campos.contiguous().data<float>(),
 	  tan_fovx,
 	  tan_fovy,
+	  R_cam_to_view.contiguous().data<float>(),
+	  dist_params.contiguous().data<float>(),
 	  radii.contiguous().data<int>(),
 	  reinterpret_cast<char*>(geomBuffer.contiguous().data_ptr()),
 	  reinterpret_cast<char*>(binningBuffer.contiguous().data_ptr()),

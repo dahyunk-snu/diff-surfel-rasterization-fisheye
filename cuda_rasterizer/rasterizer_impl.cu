@@ -202,6 +202,7 @@ int CudaRasterizer::Rasterizer::forward(
 	const int P, int D, int M,
 	const float* background,
 	const int width, int height,
+	const int roi_x_min, int roi_x_max, int roi_y_min, int roi_y_max,
 	const float* means3D,
 	const float* shs,
 	const float* colors_precomp,
@@ -214,6 +215,9 @@ int CudaRasterizer::Rasterizer::forward(
 	const float* projmatrix,
 	const float* cam_pos,
 	const float tan_fovx, float tan_fovy,
+	float focal_cam_x, float focal_cam_y,
+	const float* R_cam_to_view,
+	const float* dist_params,
 	const bool prefiltered,
 	float* out_color,
 	float* out_others,
@@ -326,6 +330,7 @@ int CudaRasterizer::Rasterizer::forward(
 		imgState.ranges,
 		binningState.point_list,
 		width, height,
+		roi_x_min, roi_x_max, roi_y_min, roi_y_max,
 		focal_x, focal_y,
 		geomState.means2D,
 		feature_ptr,
@@ -336,7 +341,10 @@ int CudaRasterizer::Rasterizer::forward(
 		imgState.n_contrib,
 		background,
 		out_color,
-		out_others), debug)
+		out_others,
+		R_cam_to_view,
+		dist_params,
+		focal_cam_x, focal_cam_y), debug)
 
 	return num_rendered;
 }
@@ -347,6 +355,7 @@ void CudaRasterizer::Rasterizer::backward(
 	const int P, int D, int M, int R,
 	const float* background,
 	const int width, int height,
+	const int roi_x_min, int roi_x_max, int roi_y_min, int roi_y_max,
 	const float* means3D,
 	const float* shs,
 	const float* colors_precomp,
@@ -358,6 +367,8 @@ void CudaRasterizer::Rasterizer::backward(
 	const float* projmatrix,
 	const float* campos,
 	const float tan_fovx, float tan_fovy,
+	const float* R_cam_to_view,
+	const float* dist_params,
 	const int* radii,
 	char* geom_buffer,
 	char* binning_buffer,
@@ -402,6 +413,7 @@ void CudaRasterizer::Rasterizer::backward(
 		imgState.ranges,
 		binningState.point_list,
 		width, height,
+		roi_x_min, roi_x_max, roi_y_min, roi_y_max,
 		focal_x, focal_y,
 		background,
 		geomState.means2D,
@@ -436,6 +448,8 @@ void CudaRasterizer::Rasterizer::backward(
 		projmatrix,
 		focal_x, focal_y,
 		tan_fovx, tan_fovy,
+		R_cam_to_view,
+		dist_params,
 		(glm::vec3*)campos,
 		(float4*)dL_dmean2D, // gradient inputs
 		dL_dnormal,		     // gradient inputs
