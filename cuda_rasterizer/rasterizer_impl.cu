@@ -75,6 +75,7 @@ __global__ void duplicateWithKeys(
 	uint64_t* gaussian_keys_unsorted,
 	uint32_t* gaussian_values_unsorted,
 	int* radii,
+	const int roi_x_min, int roi_x_max, int roi_y_min, int roi_y_max,
 	dim3 grid)
 {
 	auto idx = cg::this_grid().thread_rank();
@@ -88,7 +89,7 @@ __global__ void duplicateWithKeys(
 		uint32_t off = (idx == 0) ? 0 : offsets[idx - 1];
 		uint2 rect_min, rect_max;
 
-		getRect(points_xy[idx], radii[idx], rect_min, rect_max, grid);
+		getRectROI(points_xy[idx], radii[idx], roi_x_min, roi_x_max, roi_y_min, roi_y_max, rect_min, rect_max, grid);
 
 		// For each tile that the bounding rect overlaps, emit a 
 		// key/value pair. The key is |  tile ID  |      depth      |,
@@ -226,6 +227,10 @@ int CudaRasterizer::Rasterizer::forward(
 {
 	const float focal_y = height / (2.0f * tan_fovy);
 	const float focal_x = width / (2.0f * tan_fovx);
+	const int roi_w = roi_x_max - roi_x_min;
+	const int roi_h = roi_y_max - roi_y_min;
+	if (roi_w <= 0 || roi_h <= 0)
+		return 0;
 
 	size_t chunk_size = required<GeometryState>(P);
 	char* chunkptr = geometryBuffer(chunk_size);
@@ -236,13 +241,13 @@ int CudaRasterizer::Rasterizer::forward(
 		radii = geomState.internal_radii;
 	}
 
-	dim3 tile_grid((width + BLOCK_X - 1) / BLOCK_X, (height + BLOCK_Y - 1) / BLOCK_Y, 1);
+	dim3 tile_grid((roi_w + BLOCK_X - 1) / BLOCK_X, (roi_h + BLOCK_Y - 1) / BLOCK_Y, 1);
 	dim3 block(BLOCK_X, BLOCK_Y, 1);
 
 	// Dynamically resize image-based auxiliary buffers during training
-	size_t img_chunk_size = required<ImageState>(width * height);
+	size_t img_chunk_size = required<ImageState>(roi_w * roi_h);
 	char* img_chunkptr = imageBuffer(img_chunk_size);
-	ImageState imgState = ImageState::fromChunk(img_chunkptr, width * height);
+	ImageState imgState = ImageState::fromChunk(img_chunkptr, roi_w * roi_h);
 
 	if (NUM_CHANNELS != 3 && colors_precomp == nullptr)
 	{
@@ -264,6 +269,7 @@ int CudaRasterizer::Rasterizer::forward(
 		viewmatrix, projmatrix,
 		(glm::vec3*)cam_pos,
 		width, height,
+		roi_x_min, roi_x_max, roi_y_min, roi_y_max,
 		focal_x, focal_y,
 		tan_fovx, tan_fovy,
 		radii,
@@ -299,6 +305,7 @@ int CudaRasterizer::Rasterizer::forward(
 		binningState.point_list_keys_unsorted,
 		binningState.point_list_unsorted,
 		radii,
+		roi_x_min, roi_x_max, roi_y_min, roi_y_max,
 		tile_grid)
 	CHECK_CUDA(, debug)
 
@@ -388,7 +395,11 @@ void CudaRasterizer::Rasterizer::backward(
 {
 	GeometryState geomState = GeometryState::fromChunk(geom_buffer, P);
 	BinningState binningState = BinningState::fromChunk(binning_buffer, R);
-	ImageState imgState = ImageState::fromChunk(img_buffer, width * height);
+	const int roi_w = roi_x_max - roi_x_min;
+	const int roi_h = roi_y_max - roi_y_min;
+	if (roi_w <= 0 || roi_h <= 0)
+		return;
+	ImageState imgState = ImageState::fromChunk(img_buffer, roi_w * roi_h);
 
 	if (radii == nullptr)
 	{
@@ -398,7 +409,7 @@ void CudaRasterizer::Rasterizer::backward(
 	const float focal_y = height / (2.0f * tan_fovy);
 	const float focal_x = width / (2.0f * tan_fovx);
 
-	const dim3 tile_grid((width + BLOCK_X - 1) / BLOCK_X, (height + BLOCK_Y - 1) / BLOCK_Y, 1);
+	const dim3 tile_grid((roi_w + BLOCK_X - 1) / BLOCK_X, (roi_h + BLOCK_Y - 1) / BLOCK_Y, 1);
 	const dim3 block(BLOCK_X, BLOCK_Y, 1);
 
 	// Compute loss gradients w.r.t. 2D mean position, conic matrix,

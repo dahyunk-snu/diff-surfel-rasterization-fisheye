@@ -178,6 +178,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	const float* projmatrix,
 	const glm::vec3* cam_pos,
 	const int W, int H,
+	const int roi_x_min, int roi_x_max, int roi_y_min, int roi_y_max,
 	const float tan_fovx, const float tan_fovy,
 	const float focal_x, const float focal_y,
 	int* radii,
@@ -239,7 +240,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float radius = ceil(truncated_R * max(max(extent.x, extent.y), FilterSize));
 
 	uint2 rect_min, rect_max;
-	getRect(center, radius, rect_min, rect_max, grid);
+	getRectROI(center, radius, roi_x_min, roi_x_max, roi_y_min, roi_y_max, rect_min, rect_max, grid);
 	if ((rect_max.x - rect_min.x) * (rect_max.y - rect_min.y) == 0)
 		return;
 
@@ -287,11 +288,14 @@ renderCUDA(
 {
 	// Identify current tile and associated min/max pixel range.
 	auto block = cg::this_thread_block();
-	uint32_t horizontal_blocks = (W + BLOCK_X - 1) / BLOCK_X;
-	uint2 pix_min = { block.group_index().x * BLOCK_X, block.group_index().y * BLOCK_Y };
-	uint2 pix_max = { min(pix_min.x + BLOCK_X, W), min(pix_min.y + BLOCK_Y , H) };
+	const int roi_w = roi_x_max - roi_x_min;
+	const int roi_h = roi_y_max - roi_y_min;
+	uint32_t horizontal_blocks = (roi_w + BLOCK_X - 1) / BLOCK_X;
+	uint2 pix_min = { (uint32_t)roi_x_min + block.group_index().x * BLOCK_X, (uint32_t)roi_y_min + block.group_index().y * BLOCK_Y };
+	uint2 pix_max = { min(pix_min.x + BLOCK_X, (uint32_t)roi_x_max), min(pix_min.y + BLOCK_Y, (uint32_t)roi_y_max) };
 	uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
 	uint32_t pix_id = W * pix.y + pix.x;
+	uint32_t pix_id_roi = roi_w * (pix.y - roi_y_min) + (pix.x - roi_x_min);
 	float2 pixf = { (float)pix.x + 0.5, (float)pix.y + 0.5};
 
 	// Check if this thread is associated with a valid pixel or outside.
@@ -501,21 +505,21 @@ renderCUDA(
 	// rendering data to the frame and auxiliary buffers.
 	if (inside)
 	{
-		final_T[pix_id] = T;
-		n_contrib[pix_id] = last_contributor;
+		final_T[pix_id_roi] = T;
+		n_contrib[pix_id_roi] = last_contributor;
 		for (int ch = 0; ch < CHANNELS; ch++)
-			out_color[ch * H * W + pix_id] = C[ch] + T * bg_color[ch];
+			out_color[ch * roi_h * roi_w + pix_id_roi] = C[ch] + T * bg_color[ch];
 
 #if RENDER_AXUTILITY
-		n_contrib[pix_id + H * W] = median_contributor;
-		final_T[pix_id + H * W] = dist1;
-		final_T[pix_id + 2 * H * W] = dist2;
-		out_others[pix_id + DEPTH_OFFSET * H * W] = D;
-		out_others[pix_id + ALPHA_OFFSET * H * W] = 1 - T;
-		for (int ch=0; ch<3; ch++) out_others[pix_id + (NORMAL_OFFSET+ch) * H * W] = N[ch];
-		out_others[pix_id + MIDDEPTH_OFFSET * H * W] = median_depth;
-		out_others[pix_id + DISTORTION_OFFSET * H * W] = distortion;
-		out_others[pix_id + MEDIAN_WEIGHT_OFFSET * H * W] = median_weight;
+		n_contrib[pix_id_roi + roi_h * roi_w] = median_contributor;
+		final_T[pix_id_roi + roi_h * roi_w] = dist1;
+		final_T[pix_id_roi + 2 * roi_h * roi_w] = dist2;
+		out_others[pix_id_roi + DEPTH_OFFSET * roi_h * roi_w] = D;
+		out_others[pix_id_roi + ALPHA_OFFSET * roi_h * roi_w] = 1 - T;
+		for (int ch=0; ch<3; ch++) out_others[pix_id_roi + (NORMAL_OFFSET+ch) * roi_h * roi_w] = N[ch];
+		out_others[pix_id_roi + MIDDEPTH_OFFSET * roi_h * roi_w] = median_depth;
+		out_others[pix_id_roi + DISTORTION_OFFSET * roi_h * roi_w] = distortion;
+		out_others[pix_id_roi + MEDIAN_WEIGHT_OFFSET * roi_h * roi_w] = median_weight;
 #endif
 	}
 }
@@ -576,6 +580,7 @@ void FORWARD::preprocess(int P, int D, int M,
 	const float* projmatrix,
 	const glm::vec3* cam_pos,
 	const int W, const int H,
+	const int roi_x_min, int roi_x_max, int roi_y_min, int roi_y_max,
 	const float focal_x, const float focal_y,
 	const float tan_fovx, const float tan_fovy,
 	int* radii,
@@ -603,6 +608,7 @@ void FORWARD::preprocess(int P, int D, int M,
 		projmatrix,
 		cam_pos,
 		W, H,
+		roi_x_min, roi_x_max, roi_y_min, roi_y_max,
 		tan_fovx, tan_fovy,
 		focal_x, focal_y,
 		radii,

@@ -162,6 +162,8 @@ class _RasterizeGaussians(torch.autograd.Function):
                 raster_settings.tanfovy, 
                 raster_settings.R_cam_to_view,
                 raster_settings.dist_params,
+                raster_settings.image_height,
+                raster_settings.image_width,
                 grad_out_color,
                 grad_depth,
                 roi_x_min,

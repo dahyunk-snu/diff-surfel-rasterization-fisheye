@@ -35,6 +35,7 @@ namespace FORWARD
 		const float* projmatrix,
 		const glm::vec3* cam_pos,
 		const int W, int H,
+		const int roi_x_min, int roi_x_max, int roi_y_min, int roi_y_max,
 		const float focal_x, float focal_y,
 		const float tan_fovx, float tan_fovy,
 		int* radii,

@@ -166,11 +166,14 @@ renderCUDA(
 {
 	// We rasterize again. Compute necessary block info.
 	auto block = cg::this_thread_block();
-	const uint32_t horizontal_blocks = (W + BLOCK_X - 1) / BLOCK_X;
-	const uint2 pix_min = { block.group_index().x * BLOCK_X, block.group_index().y * BLOCK_Y };
-	const uint2 pix_max = { min(pix_min.x + BLOCK_X, W), min(pix_min.y + BLOCK_Y , H) };
+	const int roi_w = roi_x_max - roi_x_min;
+	const int roi_h = roi_y_max - roi_y_min;
+	const uint32_t horizontal_blocks = (roi_w + BLOCK_X - 1) / BLOCK_X;
+	const uint2 pix_min = { (uint32_t)roi_x_min + block.group_index().x * BLOCK_X, (uint32_t)roi_y_min + block.group_index().y * BLOCK_Y };
+	const uint2 pix_max = { min(pix_min.x + BLOCK_X, (uint32_t)roi_x_max), min(pix_min.y + BLOCK_Y , (uint32_t)roi_y_max) };
 	const uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
 	const uint32_t pix_id = W * pix.y + pix.x;
+	const uint32_t pix_id_roi = roi_w * (pix.y - roi_y_min) + (pix.x - roi_x_min);
 	const float2 pixf = { (float)pix.x + 0.5, (float)pix.y + 0.5};
 
 	// const bool inside = pix.x < W&& pix.y < H;
@@ -193,13 +196,13 @@ renderCUDA(
 
 	// In the forward, we stored the final value for T, the
 	// product of all (1 - alpha) factors. 
-	const float T_final = inside ? final_Ts[pix_id] : 0;
+	const float T_final = inside ? final_Ts[pix_id_roi] : 0;
 	float T = T_final;
 
 	// We start from the back. The ID of the last contributing
 	// Gaussian is known from each pixel from the forward.
 	uint32_t contributor = toDo;
-	const int last_contributor = inside ? n_contrib[pix_id] : 0;
+	const int last_contributor = inside ? n_contrib[pix_id_roi] : 0;
 
 	float accum_rec[C] = { 0 };
 	float dL_dpixel[C];
@@ -209,19 +212,19 @@ renderCUDA(
 	float dL_ddepth;
 	float dL_daccum;
 	float dL_dnormal2D[3];
-	const int median_contributor = inside ? n_contrib[pix_id + H * W] : 0;
+	const int median_contributor = inside ? n_contrib[pix_id_roi + roi_h * roi_w] : 0;
 	float dL_dmedian_depth;
 	float dL_dmax_dweight;
 
 	if (inside) {
-		dL_ddepth = dL_depths[DEPTH_OFFSET * H * W + pix_id];
-		dL_daccum = dL_depths[ALPHA_OFFSET * H * W + pix_id];
-		dL_dreg = dL_depths[DISTORTION_OFFSET * H * W + pix_id];
+		dL_ddepth = dL_depths[DEPTH_OFFSET * roi_h * roi_w + pix_id_roi];
+		dL_daccum = dL_depths[ALPHA_OFFSET * roi_h * roi_w + pix_id_roi];
+		dL_dreg = dL_depths[DISTORTION_OFFSET * roi_h * roi_w + pix_id_roi];
 		for (int i = 0; i < 3; i++) 
-			dL_dnormal2D[i] = dL_depths[(NORMAL_OFFSET + i) * H * W + pix_id];
+			dL_dnormal2D[i] = dL_depths[(NORMAL_OFFSET + i) * roi_h * roi_w + pix_id_roi];
 
-		dL_dmedian_depth = dL_depths[MIDDEPTH_OFFSET * H * W + pix_id];
-		dL_dmax_dweight = dL_depths[MEDIAN_WEIGHT_OFFSET * H * W + pix_id];
+		dL_dmedian_depth = dL_depths[MIDDEPTH_OFFSET * roi_h * roi_w + pix_id_roi];
+		dL_dmax_dweight = dL_depths[MEDIAN_WEIGHT_OFFSET * roi_h * roi_w + pix_id_roi];
 	}
 
 	// for compute gradient with respect to depth and normal
@@ -231,15 +234,15 @@ renderCUDA(
 	float accum_alpha_rec = 0;
 	float accum_normal_rec[3] = {0};
 	// for compute gradient with respect to the distortion map
-	const float final_D = inside ? final_Ts[pix_id + H * W] : 0;
-	const float final_D2 = inside ? final_Ts[pix_id + 2 * H * W] : 0;
+	const float final_D = inside ? final_Ts[pix_id_roi + roi_h * roi_w] : 0;
+	const float final_D2 = inside ? final_Ts[pix_id_roi + 2 * roi_h * roi_w] : 0;
 	const float final_A = 1 - T_final;
 	float last_dL_dT = 0;
 #endif
 
 	if (inside){
 		for (int i = 0; i < C; i++)
-			dL_dpixel[i] = dL_dpixels[i * H * W + pix_id];
+			dL_dpixel[i] = dL_dpixels[i * roi_h * roi_w + pix_id_roi];
 	}
 
 	float last_alpha = 0;

@@ -81,6 +81,8 @@ RasterizeGaussiansCUDA(
   const int P = means3D.size(0);
   const int H = image_height;
   const int W = image_width;
+	const int roi_h = roi_y_max - roi_y_min;
+	const int roi_w = roi_x_max - roi_x_min;
 
   CHECK_INPUT(background);
   CHECK_INPUT(means3D);
@@ -99,8 +101,8 @@ RasterizeGaussiansCUDA(
   auto int_opts = means3D.options().dtype(torch::kInt32);
   auto float_opts = means3D.options().dtype(torch::kFloat32);
 
-  torch::Tensor out_color = torch::full({NUM_CHANNELS, H, W}, 0.0, float_opts);
-  torch::Tensor out_others = torch::full({3+3+2, H, W}, 0.0, float_opts);
+	torch::Tensor out_color = torch::full({NUM_CHANNELS, roi_h, roi_w}, 0.0, float_opts);
+	torch::Tensor out_others = torch::full({3+3+2, roi_h, roi_w}, 0.0, float_opts);
   torch::Tensor radii = torch::full({P}, 0, means3D.options().dtype(torch::kInt32));
   
   torch::Device device(torch::kCUDA);
@@ -171,6 +173,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	const float tan_fovy,
 	const torch::Tensor& R_cam_to_view,
 	const torch::Tensor& dist_params,
+	const int image_height,
+	const int image_width,
 	const torch::Tensor& dL_dout_color,
 	const torch::Tensor& dL_dout_others,
 	const int roi_x_min,
@@ -205,8 +209,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
   CHECK_INPUT(geomBuffer);
 
   const int P = means3D.size(0);
-  const int H = dL_dout_color.size(1);
-  const int W = dL_dout_color.size(2);
+	const int H = image_height;
+	const int W = image_width;
   
   int M = 0;
   if(sh.size(0) != 0)

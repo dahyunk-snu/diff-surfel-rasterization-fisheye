@@ -73,6 +73,21 @@ __forceinline__ __device__ void getRect(const float2 p, int max_radius, uint2& r
 	};
 }
 
+__forceinline__ __device__ void getRectROI(
+	const float2 p,
+	int max_radius,
+	const int roi_x_min,
+	const int roi_x_max,
+	const int roi_y_min,
+	const int roi_y_max,
+	uint2& rect_min,
+	uint2& rect_max,
+	dim3 grid)
+{
+	float2 p_local = { p.x - (float)roi_x_min, p.y - (float)roi_y_min };
+	getRect(p_local, max_radius, rect_min, rect_max, grid);
+}
+
 __forceinline__ __device__ float3 transformPoint4x3(const float3& p, const float* matrix)
 {
 	float3 transformed = {
