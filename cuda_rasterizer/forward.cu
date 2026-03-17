@@ -350,7 +350,7 @@ renderCUDA(
 			focal_cam_x * K * XY, focal_cam_y * (DL + K * Y2),
 			focal_cam_x * K_z * X, focal_cam_y * K_z * Y
 		);
-		glm::mat2 dUc_dUv = dUc_dXc * R_v2c * dXv_dUv;
+		dUc_dUv = dUc_dXc * R_v2c * dXv_dUv;
     }
 
 	// Load start/end range of IDs to process in bit sorted list.
