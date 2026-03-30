@@ -202,6 +202,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	glm::vec3 p_world = glm::vec3(orig_points[3 * idx], orig_points[3 * idx + 1], orig_points[3 * idx + 2]);
 	// Perform near culling, quit if outside.
 	float3 p_view;
+	// if (!in_frustum(idx, orig_points, viewmatrix, projmatrix, prefiltered, p_view))
 	if (!in_frustum(idx, orig_points, scales, scale_modifier, rotations, opacities, viewmatrix, projmatrix, prefiltered, p_view))
 		return;
 	
@@ -383,8 +384,7 @@ renderCUDA(
 			float rho = min(rho3d, rho2d);
 			
 			float depth = (rho3d <= rho2d) ? (s.x * Tw.x + s.y * Tw.y) + Tw.z : Tw.z; // splat depth
-			// if (depth < NEAR_PLANE) continue;
-			if (depth < 0.1f) continue;
+			if (depth < NEAR_PLANE) continue;
 			float4 nor_o = collected_normal_opacity[j];
 			float normal[3] = {nor_o.x, nor_o.y, nor_o.z};
 			float power = -0.5f * rho;

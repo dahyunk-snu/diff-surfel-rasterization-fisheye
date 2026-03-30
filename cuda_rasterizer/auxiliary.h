@@ -32,7 +32,8 @@
 // distortion helper macros
 #define BACKFACE_CULL 1
 #define DUAL_VISIABLE 1
-#define NEAR_PLANE 0.2
+#define NEAR_PLANE 0.1
+#define NEAR_PLANE_SAFE 0.2
 #define FAR_PLANE 100.0
 #define DETACH_WEIGHT 0
 
@@ -172,7 +173,7 @@ __forceinline__ __device__ bool in_frustum(int idx,
 	float3 p_proj = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z * p_w };
 	p_view = transformPoint4x3(p_orig, viewmatrix);
 
-	if (p_view.z <= 0.2f)// || ((p_proj.x < -1.3 || p_proj.x > 1.3 || p_proj.y < -1.3 || p_proj.y > 1.3)))
+	if (p_view.z <= NEAR_PLANE_SAFE)// || ((p_proj.x < -1.3 || p_proj.x > 1.3 || p_proj.y < -1.3 || p_proj.y > 1.3)))
 	{
 		if (prefiltered)
 		{
@@ -282,14 +283,14 @@ __forceinline__ __device__ bool in_frustum(int idx,
     // Bring points to screen space
     p_view = transformPoint4x3(p_orig, viewmatrix);
 
-	if (p_view.z > 0.2f) 
+	if (p_view.z > NEAR_PLANE_SAFE) 
 	{
 		return true;
 	}
 
 	bool cull = false;
 
-	if (p_view.z <= 0.1f)
+	if (p_view.z <= NEAR_PLANE)
 	{
 		cull = true;
 	}
@@ -322,7 +323,7 @@ __forceinline__ __device__ bool in_frustum(int idx,
 		float extent_z = sigma_z * truncated_R;
 
 		// Bounding Sphere Volume Culling
-		if (p_view.z + extent_z <= 0.2f)
+		if (p_view.z + extent_z <= NEAR_PLANE_SAFE)
 		{
 			cull = true;
 		}
