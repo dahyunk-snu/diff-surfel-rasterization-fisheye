@@ -279,10 +279,7 @@ renderCUDA(
 	uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ bg_color,
 	float* __restrict__ out_color,
-	float* __restrict__ out_others,
-	const float* __restrict__ R_cam_to_view,
-    const float* __restrict__ dist_params,
-    float focal_cam_x, float focal_cam_y)
+	float* __restrict__ out_others)
 {
 	// Identify current tile and associated min/max pixel range.
 	auto block = cg::this_thread_block();
@@ -297,55 +294,6 @@ renderCUDA(
 	bool inside = pix.x < W&& pix.y < H;
 	// Done threads can help with fetching, but don't rasterize
 	bool done = !inside;
-
-	// Fisheye
-	glm::mat2 dUc_dUv(1.0f);
-    if (inside) 
-    {
-        glm::vec3 p_view = glm::vec3((pixf.x - W / 2.0f) / focal_x, (pixf.y - H / 2.0f) / focal_y, 1.0f);
-		glm::mat3 R_c2v(
-			R_cam_to_view[0], R_cam_to_view[1], R_cam_to_view[2],
-			R_cam_to_view[3], R_cam_to_view[4], R_cam_to_view[5],
-			R_cam_to_view[6], R_cam_to_view[7], R_cam_to_view[8]
-		);
-		glm::mat3 R_v2c = glm::transpose(R_c2v);
-		glm::vec3 p_cam = R_v2c * p_view;
-
-        float L2 = p_cam.x * p_cam.x + p_cam.y * p_cam.y;
-        float L = sqrtf(max(L2, 1e-8f));
-		float X = p_cam.x;
-		float Y = p_cam.y;
-		float XY = X * Y;
-		float X2 = X * X;
-		float Y2 = Y * Y;
-		float Z2 = p_cam.z * p_cam.z;
-		float l2_z2 = L2 + Z2;
-
-    	float theta = atan2(L, p_cam.z);
-        float th2 = theta * theta;
-        float th4 = th2 * th2;
-        float th6 = th4 * th2;
-        float th8 = th4 * th4;
-        
-        float k1 = dist_params[0], k2 = dist_params[1], k3 = dist_params[2], k4 = dist_params[3];
-        float theta_d = theta * (1.0f + k1 * th2 + k2 * th4 + k3 * th6 + k4 * th8);
-        float d_theta_d = 1.0f + 3.0f * k1 * th2 + 5.0f * k2 * th4 + 7.0f * k3 * th6 + 9.0f * k4 * th8;
-        
-        float DL = theta_d / L;
-        float K = (1.0f / L2) * (d_theta_d * (p_cam.z / l2_z2) - DL);
-        float K_z = -d_theta_d / l2_z2;
-
-		glm::mat2x3 dXv_dUv(
-			1.0f / focal_x, 0.0f, 0.0f,
-			0.0f, 1.0f / focal_y, 0.0f
-		);
-		glm::mat3x2 dUc_dXc(
-			focal_cam_x * (DL + K * X2), focal_cam_y * K * XY,       
-			focal_cam_x * K * XY, focal_cam_y * (DL + K * Y2),
-			focal_cam_x * K_z * X, focal_cam_y * K_z * Y
-		);
-		glm::mat2 dUc_dUv = dUc_dXc * R_v2c * dXv_dUv;
-    }
 
 	// Load start/end range of IDs to process in bit sorted list.
 	uint2 range = ranges[block.group_index().y * horizontal_blocks + block.group_index().x];
@@ -430,11 +378,8 @@ renderCUDA(
 			// see Eq. (11) from 2DGS paper. 
 			float2 xy = collected_xy[j];
 			float2 d = {xy.x - pixf.x, xy.y - pixf.y};
-			// Fisheye
-			glm::vec2 d_ = glm::vec2(d.x, d.y);
-            glm::vec2 d_f = dUc_dUv * d_;
 			// 2d screen distance
-			float rho2d = FilterInvSquare * (d_f.x * d_f.x + d_f.y * d_f.y); 
+			float rho2d = FilterInvSquare * (d.x * d.x + d.y * d.y); 
 			float rho = min(rho3d, rho2d);
 			
 			float depth = (rho3d <= rho2d) ? (s.x * Tw.x + s.y * Tw.y) + Tw.z : Tw.z; // splat depth
@@ -534,10 +479,7 @@ void FORWARD::render(
 	uint32_t* n_contrib,
 	const float* bg_color,
 	float* out_color,
-	float* out_others,
-	const float* R_cam_to_view,
-	const float* dist_params,
-	float focal_cam_x, float focal_cam_y)
+	float* out_others)
 {
 	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
 		ranges,
@@ -553,10 +495,7 @@ void FORWARD::render(
 		n_contrib,
 		bg_color,
 		out_color,
-		out_others,
-		R_cam_to_view,
-		dist_params,
-		focal_cam_x, focal_cam_y);
+		out_others);
 }
 
 void FORWARD::preprocess(int P, int D, int M,

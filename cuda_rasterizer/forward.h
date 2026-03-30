@@ -65,10 +65,7 @@ namespace FORWARD
 		uint32_t* n_contrib,
 		const float* bg_color,
 		float* out_color,
-		float* out_others,
-		const float* R_cam_to_view,
-		const float* dist_params,
-		float focal_cam_x, float focal_cam_y);
+		float* out_others);
 }
 
 

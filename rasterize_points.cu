@@ -50,10 +50,6 @@ RasterizeGaussiansCUDA(
 	const torch::Tensor& projmatrix,
 	const float tan_fovx, 
 	const float tan_fovy,
-	const float focal_cam_x,
-	const float focal_cam_y,
-	const torch::Tensor& R_cam_to_view,
-	const torch::Tensor& dist_params,
 	const int image_height,
 	const int image_width,
 	const torch::Tensor& sh,
@@ -87,8 +83,6 @@ RasterizeGaussiansCUDA(
   CHECK_INPUT(transMat_precomp);
   CHECK_INPUT(viewmatrix);
   CHECK_INPUT(projmatrix);
-  CHECK_INPUT(R_cam_to_view);
-  CHECK_INPUT(dist_params);
   CHECK_INPUT(sh);
   CHECK_INPUT(campos);
 
@@ -137,10 +131,6 @@ RasterizeGaussiansCUDA(
 		campos.contiguous().data<float>(),
 		tan_fovx,
 		tan_fovy,
-		focal_cam_x,
-		focal_cam_y,
-		R_cam_to_view.contiguous().data<float>(),
-		dist_params.contiguous().data<float>(),
 		prefiltered,
 		out_color.contiguous().data<float>(),
 		out_others.contiguous().data<float>(),
