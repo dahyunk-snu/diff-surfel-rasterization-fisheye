@@ -139,6 +139,68 @@ __device__ void computeColorFromSH(int idx, int deg, int max_coeffs, const glm::
 }
 
 
+// Compute the 2x2 fisheye Jacobian dUv_dUc
+__device__ __forceinline__ glm::mat2 compute_pixel_jacobian(
+	const float2 pixf,
+	const float W, const float H,
+	const float focal_x, const float focal_y,
+	const float* R_cam_to_view,
+	const float* dist_params)
+{
+	float x_norm = (pixf.x - 0.5f * W) / focal_x;
+	float y_norm = (pixf.y - 0.5f * H) / focal_y;
+	glm::vec3 p_view_norm = glm::normalize(glm::vec3(x_norm, y_norm, 1.0f));
+
+	glm::mat3 R_c2v(
+		R_cam_to_view[0], R_cam_to_view[1], R_cam_to_view[2],
+		R_cam_to_view[3], R_cam_to_view[4], R_cam_to_view[5],
+		R_cam_to_view[6], R_cam_to_view[7], R_cam_to_view[8]
+	);
+	glm::mat3 R_v2c = glm::transpose(R_c2v);
+	glm::vec3 p_cam_norm = R_v2c * p_view_norm;
+
+	float l = glm::length(glm::vec2(p_cam_norm));
+	float theta = atan2(l, p_cam_norm.z);
+	if (theta < 1e-5f || l < 1e-5f || p_cam_norm.z < 1e-5f)
+		return glm::mat2(1.0f);
+
+	float sin_th = sin(theta), cos_th = cos(theta);
+	float k1 = dist_params[0], k2 = dist_params[1], k3 = dist_params[2], k4 = dist_params[3];
+	float th2 = theta * theta, th4 = th2 * th2, th6 = th4 * th2, th8 = th4 * th4;
+
+	float r = theta * (1.0f + k1 * th2 + k2 * th4 + k3 * th6 + k4 * th8);
+	float inv_r = 1.0f / r, inv_r2 = inv_r * inv_r, inv_r3 = inv_r2 * inv_r;
+	float dr_dtheta = 1.0f + 3.0f * k1 * th2 + 5.0f * k2 * th4 + 7.0f * k3 * th6 + 9.0f * k4 * th8;
+	float dtheta_dr = 1.0f / dr_dtheta;
+
+	glm::vec2 uv_cam = (r / l) * glm::vec2(p_cam_norm);
+	float u_cam = uv_cam.x;
+	float v_cam = uv_cam.y;
+
+	float dx_du = cos_th * dtheta_dr * (u_cam * u_cam * inv_r2) + sin_th * (r * r - u_cam * u_cam) * inv_r3;
+	float dx_dv = cos_th * dtheta_dr * (u_cam * v_cam * inv_r2) - sin_th * (u_cam * v_cam) * inv_r3;
+	float dy_du = dx_dv;
+	float dy_dv = cos_th * dtheta_dr * (v_cam * v_cam * inv_r2) + sin_th * (r * r - v_cam * v_cam) * inv_r3;
+	float dz_du = -sin_th * dtheta_dr * u_cam * inv_r;
+	float dz_dv = -sin_th * dtheta_dr * v_cam * inv_r;
+
+	glm::mat2x3 dXc_dUc(
+		dx_du, dy_du, dz_du,
+		dx_dv, dy_dv, dz_dv
+	);
+
+	float inv_z = 1.0f / p_view_norm.z;
+	float inv_z2 = inv_z * inv_z;
+	glm::mat3x2 dUv_dXv(
+		inv_z, 0.0f,
+		0.0f, inv_z,
+		-p_view_norm.x * inv_z2, -p_view_norm.y * inv_z2
+	);
+
+	return dUv_dXv * R_c2v * dXc_dUc;
+}
+
+
 // Backward version of the rendering procedure.
 template <uint32_t C>
 __global__ void __launch_bounds__(BLOCK_X * BLOCK_Y)
@@ -147,6 +209,8 @@ renderCUDA(
 	const uint32_t* __restrict__ point_list,
 	int W, int H,
 	float focal_x, float focal_y,
+	const float* __restrict__ R_cam_to_view,
+	const float* __restrict__ dist_params,
 	const float* __restrict__ bg_color,
 	const float2* __restrict__ points_xy_image,
 	const float4* __restrict__ normal_opacity,
@@ -159,6 +223,7 @@ renderCUDA(
 	const float* __restrict__ dL_depths,
 	float * __restrict__ dL_dtransMat,
 	float4* __restrict__ dL_dmean2D,
+	float4* __restrict__ dL_dmean2D_fish,
 	float* __restrict__ dL_dnormal3D,
 	float* __restrict__ dL_dopacity,
 	float* __restrict__ dL_dcolors)
@@ -176,6 +241,9 @@ renderCUDA(
 	const uint2 range = ranges[block.group_index().y * horizontal_blocks + block.group_index().x];
 
 	const int rounds = ((range.y - range.x + BLOCK_SIZE - 1) / BLOCK_SIZE);
+
+	// Per-pixel fisheye Jacobian
+	const glm::mat2 J_pix = compute_pixel_jacobian(pixf, (float)W, (float)H, focal_x, focal_y, R_cam_to_view, dist_params);
 
 	bool done = !inside;
 	int toDo = range.y - range.x;
@@ -418,8 +486,8 @@ renderCUDA(
 				float3 dL_dTu = {-dL_dk.x, -dL_dk.y, -dL_dk.z};
 				float3 dL_dTv = {-dL_dl.x, -dL_dl.y, -dL_dl.z};
 				float3 dL_dTw = {
-					pixf.x * dL_dk.x + pixf.y * dL_dl.x + dL_dz * dz_dTw.x, 
-					pixf.x * dL_dk.y + pixf.y * dL_dl.y + dL_dz * dz_dTw.y, 
+					pixf.x * dL_dk.x + pixf.y * dL_dl.x + dL_dz * dz_dTw.x,
+					pixf.x * dL_dk.y + pixf.y * dL_dl.y + dL_dz * dz_dTw.y,
 					pixf.x * dL_dk.z + pixf.y * dL_dl.z + dL_dz * dz_dTw.z};
 
 
@@ -434,21 +502,38 @@ renderCUDA(
 				atomicAdd(&dL_dtransMat[global_id * 9 + 7],  dL_dTw.y);
 				atomicAdd(&dL_dtransMat[global_id * 9 + 8],  dL_dTw.z);
 
-                //AbsGS
-                atomicAdd(&dL_dmean2D[global_id].z, fabs(dL_dTu.z));
-                atomicAdd(&dL_dmean2D[global_id].w, fabs(dL_dTv.z));
+				// Per-pixel fisheye-coord contribution
+				float gu = dL_dTu.z * Tw.z * W;
+				float gv = dL_dTv.z * Tw.z * H;
+				float dx_fish = J_pix[0][0] * gu + J_pix[0][1] * gv;
+				float dy_fish = J_pix[1][0] * gu + J_pix[1][1] * gv;
+				atomicAdd(&dL_dmean2D_fish[global_id].x, dx_fish);
+				atomicAdd(&dL_dmean2D_fish[global_id].y, dy_fish);
+				atomicAdd(&dL_dmean2D_fish[global_id].z, fabs(dx_fish));
+				atomicAdd(&dL_dmean2D_fish[global_id].w, fabs(dy_fish));
 
             } else {
 				// // Update gradients w.r.t. center of Gaussian 2D mean position
 				float dG_ddelx = -G * FilterInvSquare * d.x;
 				float dG_ddely = -G * FilterInvSquare * d.y;
-				atomicAdd(&dL_dmean2D[global_id].x, dL_dG * dG_ddelx); // not scaled
-				atomicAdd(&dL_dmean2D[global_id].y, dL_dG * dG_ddely); // not scaled
-                //AbsGS
-                atomicAdd(&dL_dmean2D[global_id].z, fabs(dL_dG * dG_ddelx)); // not scaled
-                atomicAdd(&dL_dmean2D[global_id].w, fabs(dL_dG * dG_ddely)); // not scaled
+				float g_x = dL_dG * dG_ddelx;
+				float g_y = dL_dG * dG_ddely;
+				atomicAdd(&dL_dmean2D[global_id].x, g_x); // pinhole-pix sum, consumed by computeAABB transMat chain
+				atomicAdd(&dL_dmean2D[global_id].y, g_y);
 
 				atomicAdd(&dL_dtransMat[global_id * 9 + 8],  dL_dz); // propagate depth loss
+
+				// Per-pixel fisheye-coord contribution
+				float d_pin = Tw.x * Tw.x + Tw.y * Tw.y - Tw.z * Tw.z;
+				float c = -Tw.z * Tw.z / d_pin;
+				float gu = g_x * c * W;
+				float gv = g_y * c * H;
+				float dx_fish = J_pix[0][0] * gu + J_pix[0][1] * gv;
+				float dy_fish = J_pix[1][0] * gu + J_pix[1][1] * gv;
+				atomicAdd(&dL_dmean2D_fish[global_id].x, dx_fish);
+				atomicAdd(&dL_dmean2D_fish[global_id].y, dy_fish);
+				atomicAdd(&dL_dmean2D_fish[global_id].z, fabs(dx_fish));
+				atomicAdd(&dL_dmean2D_fish[global_id].w, fabs(dy_fish));
 			}
 
 			// Update gradients w.r.t. opacity of the Gaussian
@@ -605,21 +690,17 @@ __global__ void preprocessCUDA(
 		computeColorFromSH(idx, D, M, (glm::vec3*)means3D, *campos, shs, clamped, (glm::vec3*)dL_dcolors, (glm::vec3*)dL_dmean3Ds, (glm::vec3*)dL_dshs);
 }
 
-__global__ void computeAABB(int P, 
+__global__ void computeAABB(int P,
 	const int * radii,
-	const float W, const float H,
 	const float * transMats,
-	const float3* means3D,
-	const float* viewmatrix,
-	const float* R_cam_to_view,
-	const float* dist_params,
+	const float4 * dL_dmean2D_fish,
 	float4 * dL_dmean2Ds,
 	float *dL_dtransMats) {
-	
+
 	auto idx = cg::this_grid().thread_rank();
 	if (idx >= P || !(radii[idx] > 0))
 		return;
-	
+
 	const float* transMat = transMats + 9 * idx;
 
 	const float4 dL_dmean2D = dL_dmean2Ds[idx];
@@ -632,11 +713,6 @@ __global__ void computeAABB(int P,
 
 	float d = glm::dot(glm::vec3(1.0, 1.0, -1.0), T[3] * T[3]);
 	glm::vec3 f = glm::vec3(1.0, 1.0, -1.0) * (1.0f / d);
-
-	glm::vec3 p = glm::vec3(
-		glm::dot(f, T[0] * T[3]),
-		glm::dot(f, T[1] * T[3]), 
-		glm::dot(f, T[2] * T[3]));
 
 	glm::vec3 dL_dT0 = dL_dmean2D.x * f * T[3];
 	glm::vec3 dL_dT1 = dL_dmean2D.y * f * T[3];
@@ -655,93 +731,8 @@ __global__ void computeAABB(int P,
 	dL_dtransMats[9 * idx + 7] += dL_dT3.y;
 	dL_dtransMats[9 * idx + 8] += dL_dT3.z;
 
-	// just use to hack the projected 2D gradient here.
-	float z = transMat[8];
-	float dL_du = dL_dtransMats[9 * idx + 2] * z * W; 
-    float dL_dv = dL_dtransMats[9 * idx + 5] * z * H;
-
-    // AbsGS
-	float dL_du_abs = (dL_dmean2D.z + dL_dT0.z) * z * W;
-    float dL_dv_abs = (dL_dmean2D.w + dL_dT1.z) * z * H;
-
-	// Fisheye
-	// camera information 
-	const glm::mat3 R = glm::mat3(
-		viewmatrix[0],viewmatrix[1],viewmatrix[2],
-		viewmatrix[4],viewmatrix[5],viewmatrix[6],
-		viewmatrix[8],viewmatrix[9],viewmatrix[10]
-	); // viewmat 
-
-	const glm::vec3 cam_pos = glm::vec3(viewmatrix[12], viewmatrix[13], viewmatrix[14]); // camera center
-	glm::vec3 p_world = glm::vec3(means3D[idx].x, means3D[idx].y, means3D[idx].z);
-	glm::vec3 p_view = R * p_world + cam_pos;
-	glm::vec3 p_view_norm = glm::normalize(p_view);
-
-	glm::mat3 R_c2v(
-        R_cam_to_view[0], R_cam_to_view[1], R_cam_to_view[2],
-        R_cam_to_view[3], R_cam_to_view[4], R_cam_to_view[5],
-        R_cam_to_view[6], R_cam_to_view[7], R_cam_to_view[8]
-    );
-	glm::mat3 R_v2c = glm::transpose(R_c2v);
-	glm::vec3 p_cam_norm = R_v2c * p_view_norm;
-
-	float l = glm::length(glm::vec2(p_cam_norm));
-    float theta = atan2(l, p_cam_norm.z);
-	float sin_th = sin(theta), cos_th = cos(theta);
-
-	// If the point is too close to the camera center, the gradient will be unstable
-	if (theta < 1e-5f || l < 1e-5f || p_cam_norm.z < 1e-5f) {
-        dL_dmean2Ds[idx].x = dL_du;
-        dL_dmean2Ds[idx].y = dL_dv;
-        dL_dmean2Ds[idx].z = dL_du_abs;
-        dL_dmean2Ds[idx].w = dL_dv_abs;
-        return;
-    }
-
-	// OpenCV fisheye distortion model
-	float k1 = dist_params[0], k2 = dist_params[1], k3 = dist_params[2], k4 = dist_params[3];
-    float th2 = theta * theta, th4 = th2 * th2, th6 = th4 * th2, th8 = th4 * th4;
-
-	float r = theta * (1.0f + k1 * th2 + k2 * th4 + k3 * th6 + k4 * th8);
-	float inv_r = 1.0f / r, inv_r2 = inv_r * inv_r, inv_r3 = inv_r2 * inv_r;
-	float dr_dtheta = 1.0f + 3.0f * k1 * th2 + 5.0f * k2 * th4 + 7.0f * k3 * th6 + 9.0f * k4 * th8;
-	float dtheta_dr = 1.0f / dr_dtheta;
-
-	glm::vec2 uv_cam = (r / l) * glm::vec2(p_cam_norm);
-    float u_cam = uv_cam.x;
-    float v_cam = uv_cam.y;	    
-
-	// Compute the gradient of the projected 2D point w.r.t. the 3D point in camera space.
-	float dx_du = cos_th * dtheta_dr * (u_cam * u_cam * inv_r2) + sin_th * (r * r - u_cam * u_cam) * inv_r3;
-    float dx_dv = cos_th * dtheta_dr * (u_cam * v_cam * inv_r2) - sin_th * (u_cam * v_cam) * inv_r3;
-    float dy_du = dx_dv; 
-    float dy_dv = cos_th * dtheta_dr * (v_cam * v_cam * inv_r2) + sin_th * (r * r - v_cam * v_cam) * inv_r3;
-    float dz_du = -sin_th * dtheta_dr * u_cam * inv_r;
-    float dz_dv = -sin_th * dtheta_dr * v_cam * inv_r;
-
-	glm::mat2x3 dXc_dUc(
-        dx_du, dy_du, dz_du,
-        dx_dv, dy_dv, dz_dv
-    );
-
-	float inv_z = 1.0f / p_view_norm.z;
-    float inv_z2 = inv_z * inv_z;
-    
-    glm::mat3x2 dUv_dXv(
-        inv_z, 0.0f,
-        0.0f, inv_z,
-        -p_view_norm.x * inv_z2, -p_view_norm.y * inv_z2
-    );
-
-	// R_c2v = dXv_dXc, so the full Jacobian is
-    glm::mat2 dUv_dUc = dUv_dXv * R_c2v * dXc_dUc;
-
-    dL_dmean2Ds[idx].x = dUv_dUc[0][0] * dL_du + dUv_dUc[0][1] * dL_dv;
-    dL_dmean2Ds[idx].y = dUv_dUc[1][0] * dL_du + dUv_dUc[1][1] * dL_dv;
-
-    // AbsGS
-    dL_dmean2Ds[idx].z = abs(dUv_dUc[0][0]) * dL_du_abs + abs(dUv_dUc[0][1]) * dL_dv_abs;
-    dL_dmean2Ds[idx].w = abs(dUv_dUc[1][0]) * dL_du_abs + abs(dUv_dUc[1][1]) * dL_dv_abs;
+	// Output: per-pixel-Jacobian fisheye-coord gradient (accumulated in renderCUDA).
+	dL_dmean2Ds[idx] = dL_dmean2D_fish[idx];
 }
 
 
@@ -759,10 +750,9 @@ void BACKWARD::preprocess(
 	const float* projmatrix,
 	const float focal_x, const float focal_y,
 	const float tan_fovx, const float tan_fovy,
-	const float* R_cam_to_view,
-	const float* dist_params,
-	const glm::vec3* campos, 
+	const glm::vec3* campos,
 	float4* dL_dmean2Ds,
+	const float4* dL_dmean2D_fish,
 	const float* dL_dnormal3Ds,
 	float* dL_dtransMats,
 	float* dL_dcolors,
@@ -771,24 +761,16 @@ void BACKWARD::preprocess(
 	glm::vec2* dL_dscales,
 	glm::vec4* dL_drots)
 {
-	// Propagate gradients for the path of 2D conic matrix computation. 
-	// Somewhat long, thus it is its own kernel rather than being part of 
+	// Propagate gradients for the path of 2D conic matrix computation.
+	// Somewhat long, thus it is its own kernel rather than being part of
 	// "preprocess". When done, loss gradient w.r.t. 3D means has been
-	// modified and gradient w.r.t. 3D covariance matrix has been computed.	
+	// modified and gradient w.r.t. 3D covariance matrix has been computed.
 	// propagate gradients to transMat
-
-	// we do not use the center actually
-	float W = focal_x * tan_fovx;
-	float H = focal_y * tan_fovy;
 	computeAABB << <(P + 255) / 256, 256 >> >(
 		P,
 		radii,
-		W, H,
 		transMats,
-		(float3*)means3D,
-		viewmatrix,
-		R_cam_to_view,
-		dist_params,
+		dL_dmean2D_fish,
 		dL_dmean2Ds,
 		dL_dtransMats);
 	
@@ -826,6 +808,8 @@ void BACKWARD::render(
 	const uint32_t* point_list,
 	int W, int H,
 	float focal_x, float focal_y,
+	const float* R_cam_to_view,
+	const float* dist_params,
 	const float* bg_color,
 	const float2* means2D,
 	const float4* normal_opacity,
@@ -838,6 +822,7 @@ void BACKWARD::render(
 	const float* dL_depths,
 	float * dL_dtransMat,
 	float4* dL_dmean2D,
+	float4* dL_dmean2D_fish,
 	float* dL_dnormal3D,
 	float* dL_dopacity,
 	float* dL_dcolors)
@@ -847,6 +832,8 @@ void BACKWARD::render(
 		point_list,
 		W, H,
 		focal_x, focal_y,
+		R_cam_to_view,
+		dist_params,
 		bg_color,
 		means2D,
 		normal_opacity,
@@ -859,6 +846,7 @@ void BACKWARD::render(
 		dL_depths,
 		dL_dtransMat,
 		dL_dmean2D,
+		dL_dmean2D_fish,
 		dL_dnormal3D,
 		dL_dopacity,
 		dL_dcolors

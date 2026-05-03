@@ -398,6 +398,13 @@ void CudaRasterizer::Rasterizer::backward(
 	const float* color_ptr = (colors_precomp != nullptr) ? colors_precomp : geomState.rgb;
 	const float* depth_ptr = geomState.depths;
 	const float* transMat_ptr = (transMat_precomp != nullptr) ? transMat_precomp : geomState.transMat;
+
+	// Scratch buffer: per-pixel-Jacobian fisheye-coord mean2D gradient.
+	// Accumulated atomically in renderCUDA; consumed by computeAABB which writes it back to dL_dmean2D.
+	float4* dL_dmean2D_fish = nullptr;
+	CHECK_CUDA(cudaMalloc(&dL_dmean2D_fish, P * sizeof(float4)), debug);
+	CHECK_CUDA(cudaMemset(dL_dmean2D_fish, 0, P * sizeof(float4)), debug);
+
 	CHECK_CUDA(BACKWARD::render(
 		tile_grid,
 		block,
@@ -405,6 +412,8 @@ void CudaRasterizer::Rasterizer::backward(
 		binningState.point_list,
 		width, height,
 		focal_x, focal_y,
+		R_cam_to_view,
+		dist_params,
 		background,
 		geomState.means2D,
 		geomState.normal_opacity,
@@ -417,6 +426,7 @@ void CudaRasterizer::Rasterizer::backward(
 		dL_depths,
 		dL_dtransMat,
 		(float4*)dL_dmean2D,
+		dL_dmean2D_fish,
 		dL_dnormal,
 		dL_dopacity,
 		dL_dcolor), debug)
@@ -438,10 +448,9 @@ void CudaRasterizer::Rasterizer::backward(
 		projmatrix,
 		focal_x, focal_y,
 		tan_fovx, tan_fovy,
-		R_cam_to_view,
-		dist_params,
 		(glm::vec3*)campos,
 		(float4*)dL_dmean2D, // gradient inputs
+		dL_dmean2D_fish,
 		dL_dnormal,		     // gradient inputs
 		dL_dtransMat,
 		dL_dcolor,
@@ -449,4 +458,6 @@ void CudaRasterizer::Rasterizer::backward(
 		(glm::vec3*)dL_dmean3D,
 		(glm::vec2*)dL_dscale,
 		(glm::vec4*)dL_drot), debug)
+
+	CHECK_CUDA(cudaFree(dL_dmean2D_fish), debug);
 }

@@ -7,3 +7,4 @@ dist/
 *.pyc
 .idea
 env.bat
+CLAUDE.md
