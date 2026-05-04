@@ -503,8 +503,8 @@ renderCUDA(
 				atomicAdd(&dL_dtransMat[global_id * 9 + 8],  dL_dTw.z);
 
 				// Per-pixel fisheye-coord contribution
-				float gu = dL_dTu.z * Tw.z * W;
-				float gv = dL_dTv.z * Tw.z * H;
+				float gu = dL_dTu.z * Tw.z * W * 0.5f;
+				float gv = dL_dTv.z * Tw.z * H * 0.5f;
 				float dx_fish = J_pix[0][0] * gu + J_pix[0][1] * gv;
 				float dy_fish = J_pix[1][0] * gu + J_pix[1][1] * gv;
 				atomicAdd(&dL_dmean2D_fish[global_id].x, dx_fish);
@@ -526,14 +526,14 @@ renderCUDA(
 				// Per-pixel fisheye-coord contribution
 				float d_pin = Tw.x * Tw.x + Tw.y * Tw.y - Tw.z * Tw.z;
 				float c = -Tw.z * Tw.z / d_pin;
-				float gu = g_x * c * W;
-				float gv = g_y * c * H;
-				float dx_fish = J_pix[0][0] * gu + J_pix[0][1] * gv;
-				float dy_fish = J_pix[1][0] * gu + J_pix[1][1] * gv;
+				float a_x = J_pix[0][0] * g_x * W * 0.5f + J_pix[0][1] * g_y * H * 0.5f;
+				float a_y = J_pix[1][0] * g_x * W * 0.5f + J_pix[1][1] * g_y * H * 0.5f;
+				float dx_fish = a_x * c;
+				float dy_fish = a_y * c;
 				atomicAdd(&dL_dmean2D_fish[global_id].x, dx_fish);
 				atomicAdd(&dL_dmean2D_fish[global_id].y, dy_fish);
-				atomicAdd(&dL_dmean2D_fish[global_id].z, fabs(dx_fish));
-				atomicAdd(&dL_dmean2D_fish[global_id].w, fabs(dy_fish));
+				atomicAdd(&dL_dmean2D_fish[global_id].z, fabs(a_x) * Tw.z + dx_fish);
+				atomicAdd(&dL_dmean2D_fish[global_id].w, fabs(a_y) * Tw.z + dy_fish);
 			}
 
 			// Update gradients w.r.t. opacity of the Gaussian
@@ -731,7 +731,7 @@ __global__ void computeAABB(int P,
 	dL_dtransMats[9 * idx + 7] += dL_dT3.y;
 	dL_dtransMats[9 * idx + 8] += dL_dT3.z;
 
-	// Output: per-pixel-Jacobian fisheye-coord gradient (accumulated in renderCUDA).
+	// per-pixel-Jacobian fisheye-coord gradient
 	dL_dmean2Ds[idx] = dL_dmean2D_fish[idx];
 }
 
